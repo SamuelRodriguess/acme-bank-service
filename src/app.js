@@ -2,10 +2,10 @@ require('dotenv').config();
 const express = require("express");
 const path = require("path");
 const session = require("express-session");
-
+/* 
 const { RedisStore } = require("connect-redis");
 const { createClient } = require("redis");
-
+ */
 const indexRoutes = require("./routes/indexRoutes");
 const authRoutes = require("./routes/authRoutes");
 const homeRoutes = require("./routes/homeRoutes");
@@ -17,12 +17,6 @@ const { CSRF_TOKEN_ERROR_CODE } = require("./config/constants");
 
 const { helmetMiddleware, cookieParser } = require("./config/middlewares");
 
-const redisClient = createClient({
-  legacyMode: true, 
-  url: process.env.REDIS_PUBLIC_URL
-});
-redisClient.connect().catch(console.error);
-
 const app = express();
 
 app.set("view engine", "ejs");
@@ -32,7 +26,6 @@ app.use(cookieParser());
 
 app.use(
   session({
-    store: new RedisStore({ client: redisClient }),
     secret: "secret",
     resave: false,
     saveUninitialized: false,
