@@ -3,31 +3,45 @@ const express = require("express");
 const session = require("express-session");
 const path = require("path");
 const fs = require("fs");
-const { body, validationResult } = require("express-validator");
+const { body, check, validationResult } = require("express-validator");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
-
 const db = new sqlite3.Database("./db/bank_sample.db");
+const csurf = require("csurf");
+const cookieParser = require("cookie-parser");
 
 const app = express();
 const PORT = 3000;
 app.set("view engine", "ejs");
 app.use(express.static(path.join(__dirname, "public")));
 app.use(helmet());
+
 app.use(
   session({
     secret: "secret",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: false,
-      httpOnly: true,
-    },
+    resave: true,
+    saveUninitialized: true,
   })
 );
 
 app.use(express.urlencoded({ extended: false, limit: "10kb" }));
 app.use(express.json({ limit: "10kb" }));
+app.use(cookieParser());
+
+const csfMiddleware = csurf({
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax" // ou "strict"
+  },
+});
+
+app.use((error, request, response, next) =>{
+  if (error.code !== "EBADCSRFTOKEN") {
+    return next();
+  }
+  response.status(403);
+  response.send("The token is invalid");
+});
 
 app.get("/", function (request, response) {
   response.sendFile(path.join(__dirname + "/html/login.html"));
@@ -88,11 +102,11 @@ app.get("/home", function (request, response) {
   response.render("home_page", balanceUser);
 });
 
-app.get("/transfer", function (request, response) {
+app.get("/transfer", csfMiddleware, function (request, response) {
   if (!request.session.loggedin) {
     return response.redirect("/");
   }
-  const sent = { sent: '' };
+  const sent = { sent: "", csrfToken: request.csrfToken() };
   response.render("transfer", sent);
 });
 
@@ -109,7 +123,7 @@ const transferValidation = [
     .withMessage("Amount must be greater than zero"),
 ];
 
-app.post("/transfer", transferValidation, (request, response) => {
+app.post("/transfer", csfMiddleware, transferValidation, (request, response) => {
   if (!request.session.loggedin) {
     return response.redirect("/");
   }
@@ -119,12 +133,13 @@ app.post("/transfer", transferValidation, (request, response) => {
   const account_from = request.session.account_no;
 
   if (!account_to || !amount) {
-    return response.render("transfer", { sent: "" });
+    return response.render("transfer", { sent: "", csrfToken: request.csrfToken() });
   }
 
   if (balance <= amount) {
     return response.render("transfer", {
       sent: "You Don't Have Enough Funds.",
+      csrfToken: request.csrfToken()
     });
   }
   // Use serialize to execute queries sequentially inside a transaction
@@ -140,6 +155,7 @@ app.post("/transfer", transferValidation, (request, response) => {
           db.run("ROLLBACK");
           return response.render("transfer", {
             sent: "Error processing transfer.",
+            csrfToken: request.csrfToken()
           });
         }
         db.run(
@@ -150,10 +166,11 @@ app.post("/transfer", transferValidation, (request, response) => {
               db.run("ROLLBACK");
               return response.render("transfer", {
                 sent: "Error processing transfer.",
+                csrfToken: request.csrfToken()
               });
             }
             db.run("COMMIT");
-            return response.render("transfer", { sent: "Money Transferred" });
+            return response.render("transfer", { sent: "Money Transferred", csrfToken: request.csrfToken() } );
           }
         );
       }
@@ -163,7 +180,7 @@ app.post("/transfer", transferValidation, (request, response) => {
 
 app.get("/download", function (request, response) {
   if (!request.session.loggedin) {
-    return request.redirect("/");
+    return response.redirect("/");
   }
   response.render("download", { file_name: request.session.file_history });
 });
@@ -222,10 +239,10 @@ app.post(
     .escape(),
   (request, response) => {
     if (!request.session.loggedin) {
-      return request.redirect("/");
+      return response.redirect("/");
     }
 
-    const errors = validationResult(req);
+    const errors = validationResult(request);
     if (!errors.isEmpty()) {
       return db.all(
         `SELECT username, message FROM public_forum`,
@@ -265,10 +282,10 @@ app.post(
 
 app.get(
   "/public_ledger",
-  query("id").optional().isInt().withMessage("id must be an integer"),
+  check("id").optional().isInt().withMessage("id must be an integer"),
   (request, response) => {
     if (!request.session.loggedin) {
-      return request.redirect("/");
+      return response.redirect("/");
     }
 
     const errors = validationResult(request);

@@ -43,7 +43,7 @@
           <label class="form-label">Amount To Send</label>
           <input class="form-control" name="amount" value="" />
         </div>
-
+        <input type="hidden" name="_csrf" value="<%= csrfToken %>" />
         <button name="submit" type="submit" class="btn btn-primary">
           Submit
         </button>
