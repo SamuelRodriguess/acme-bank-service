@@ -18,7 +18,7 @@ const { helmetMiddleware, cookieParser } = require("./config/middlewares");
 
 const redisClient = createClient({
   legacyMode: true, 
-  url: process.env.REDIS_URL,
+  url: process.env.REDIS_PROXY,
 });
 redisClient.connect().catch(console.error);
 
