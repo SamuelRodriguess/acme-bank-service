@@ -163,7 +163,9 @@ app.post("/transfer", transferValidation, (request, response) => {
 });
 
 app.get("/download", function (request, response) {
-  if (!req.session.loggedin) return res.redirect("/");
+  if (!request.session.loggedin) {
+    return request.redirect("/");
+  }
   response.render("download", { file_name: request.session.file_history });
 });
 
@@ -176,106 +178,125 @@ const downloadValidation = [
     .withMessage("Invalid file name"),
 ];
 
-app.post("/download", downloadValidation, (req, res) => {
-  if (!req.session.loggedin) return res.redirect("/");
-
-  const errors = validationResult(req);
+app.post("/download", downloadValidation, (request, response) => {
+  if (!request.session.loggedin) {
+    return response.redirect("/");
+  }
+  const errors = validationResult(request);
   if (!errors.isEmpty()) {
-    return res.status(400).json({ errors: errors.array() });
+    return response.status(400).json({ errors: errors.array() });
   }
 
-  const file_name = req.body.file;
+  const file_name = request.body.file;
   const safeFileName = path.basename(file_name);
   const filePath = path.join(__dirname, "history_files", safeFileName);
 
   if (!filePath.startsWith(path.join(__dirname, "history_files"))) {
-    return res.status(400).send("Invalid access");
+    return response.status(400).send("Invalid access");
   }
 
   fs.readFile(filePath, "utf8", (err, content) => {
     if (err) {
-      return res.status(404).send("File not found");
+      return response.status(404).send("File not found");
     }
-    res.type("text/plain").send(content);
+    response.type("text/plain").send(content);
   });
 });
 
-//XSS CODE
 app.get("/public_forum", function (request, response) {
-  if (request.session.loggedin) {
-    db.all(`SELECT username,message FROM public_forum`, (err, rows) => {
-      console.log(rows);
-      console.log(err);
-      response.render("forum", { rows });
-    });
-  } else {
-    response.redirect("/");
+  if (!request.session.loggedin) {
+    return response.redirect("/");
   }
-  //response.end();
+  db.all(`SELECT username,message FROM public_forum`, (err, rows) => {
+    console.log(rows);
+    console.log(err);
+    response.render("forum", { rows });
+  });
 });
 
-app.post("/public_forum", function (request, response) {
-  if (request.session.loggedin) {
+app.post(
+  "/public_forum",
+  body("comment")
+    .trim()
+    .notEmpty()
+    .withMessage("Comment cannot be empty")
+    .escape(),
+  (request, response) => {
+    if (!request.session.loggedin) return request.redirect("/");
+
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return db.all(
+        `SELECT username, message FROM public_forum`,
+        (err, rows) => {
+          if (err) {
+            console.error("Forum load error:", err);
+            return request.send("Error loading forum");
+          }
+          return request.render("forum", {
+            rows,
+            error: errors.array()[0].msg,
+          });
+        }
+      );
+    }
+
     const comment = request.body.comment;
     const username = request.session.username;
-    if (comment) {
-      db.all(
-        `INSERT INTO public_forum (username,message) VALUES ('${username}','${comment}')`,
-        (err, rows) => {
-          console.log(err);
-        }
-      );
-      db.all(`SELECT username,message FROM public_forum`, (err, rows) => {
-        console.log(rows);
-        console.log(err);
-        response.render("forum", { rows });
-      });
-    } else {
-      db.all(`SELECT username,message FROM public_forum`, (err, rows) => {
-        console.log(rows);
-        console.log(err);
-        response.render("forum", { rows });
-      });
-    }
-    comment = "";
-  } else {
-    response.redirect("/");
-  }
-  comment = "";
-  //response.end();
-});
 
-//SQL UNION INJECTION
-app.get("/public_ledger", function (request, response) {
-  if (request.session.loggedin) {
-    const id = request.query.id;
-    if (id) {
-      db.all(
-        `SELECT * FROM public_ledger WHERE from_account = '${id}'`,
-        (err, rows) => {
-          console.log("PROCESSING INPU");
-          console.log(err);
-          if (rows) {
-            response.render("ledger", { rows });
-          } else {
-            response.render("ledger", { rows });
+    db.run(
+      `INSERT INTO public_forum (username, message) VALUES (?, ?)`,
+      [username, comment],
+      (err) => {
+        if (err) {
+          return response.send("Error posting comment");
+        }
+        db.all(`SELECT username, message FROM public_forum`, (err, rows) => {
+          if (err) {
+            return response.send("Error loading forum");
           }
+          response.render("forum", { rows });
+        });
+      }
+    );
+  }
+);
+
+app.get(
+  "/public_ledger",
+  query("id").optional().isInt().withMessage("id must be an integer"),
+  (request, response) => {
+    if (!request.session.loggedin) {
+      return request.redirect("/");
+    }
+
+    const errors = validationResult(request);
+    if (!errors.isEmpty()) {
+      return response.status(400).json({ errors: errors.array() });
+    }
+
+    if (request.query.id) {
+      db.all(
+        `SELECT * FROM public_ledger WHERE from_account = ?`,
+        [request.query.id],
+        (err, rows) => {
+          if (err) {
+            return response.send("Error loading ledger");
+          }
+          response.render("ledger", { rows });
         }
       );
-    } else {
-      db.all(`SELECT * FROM public_ledger`, (err, rows) => {
-        if (rows) {
-          response.render("ledger", { rows });
-        } else {
-          response.render("ledger", { rows });
-        }
-      });
+      return response.end();
     }
-  } else {
-    response.redirect("/");
+
+    db.all(`SELECT * FROM public_ledger`, (err, rows) => {
+      if (err) {
+        return response.send("Error loading ledger");
+      }
+      response.render("ledger", { rows });
+    });
   }
-  //response.end();
-});
+);
 
 app.listen(PORT, () => {
   console.log(`Server is running on port: ${PORT}`);

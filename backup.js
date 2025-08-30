@@ -52,64 +52,67 @@ app.get("/", (req, res) => {
 });
 
 const loginValidation = [
-  body("username").trim().notEmpty().withMessage("Username is required").escape(),
+  body("username")
+    .trim()
+    .notEmpty()
+    .withMessage("Username is required")
+    .escape(),
   body("password").trim().notEmpty().withMessage("Password is required"),
 ];
 
-app.post(
-  "/auth",
-  loginLimiter,
-  loginValidation,
-  (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).send(errors.array()[0].msg);
-    }
-
-    const { username, password } = req.body;
-    if (username && password) {
-      db.get(
-        `SELECT * FROM users WHERE username = ? AND password = ?`,
-        [username, password],
-        (error, results) => {
-          if (error) {
-            console.error(error);
-            return res.status(500).send("Server error");
-          }
-          if (results) {
-            req.session.loggedin = true;
-            req.session.username = results.username;
-            req.session.balance = results.balance;
-            req.session.file_history = results.file_history;
-            req.session.account_no = results.account_no;
-            res.redirect("/home");
-          } else {
-            res.status(401).send("Incorrect Username and/or Password!");
-          }
-        }
-      );
-    } else {
-      res.status(400).send("Please enter Username and Password!");
-    }
+app.post("/auth", loginLimiter, loginValidation, (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).send(errors.array()[0].msg);
   }
-);
+
+  const { username, password } = req.body;
+  if (username && password) {
+    db.get(
+      `SELECT * FROM users WHERE username = ? AND password = ?`,
+      [username, password],
+      (error, results) => {
+        if (error) {
+          console.error(error);
+          return res.status(500).send("Server error");
+        }
+        if (results) {
+          req.session.loggedin = true;
+          req.session.username = results.username;
+          req.session.balance = results.balance;
+          req.session.file_history = results.file_history;
+          req.session.account_no = results.account_no;
+          res.redirect("/home");
+        } else {
+          res.status(401).send("Incorrect Username and/or Password!");
+        }
+      }
+    );
+  } else {
+    res.status(400).send("Please enter Username and Password!");
+  }
+});
 app.get("/home", (req, res) => {
   if (!req.session.loggedin) return res.redirect("/");
 
-  db.get("SELECT balance FROM users WHERE username = ?", [req.session.username], (err, row) => {
-    if (err) {
-      console.error("DB error on /home:", err);
-      return res.status(500).send("Server error");
-    }
-    if (!row) {
-      return res.status(404).send("User not found");
-    }
+  db.get(
+    "SELECT balance FROM users WHERE username = ?",
+    [req.session.username],
+    (err, row) => {
+      if (err) {
+        console.error("DB error on /home:", err);
+        return res.status(500).send("Server error");
+      }
+      if (!row) {
+        return res.status(404).send("User not found");
+      }
 
-    res.render("home_page", {
-      username: req.session.username,
-      balance: row.balance,
-    });
-  });
+      res.render("home_page", {
+        username: req.session.username,
+        balance: row.balance,
+      });
+    }
+  );
 });
 
 app.get("/transfer", (req, res) => {
@@ -136,69 +139,100 @@ app.post(
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return res.render("transfer", { sent: errors.array()[0].msg, csrfToken: req.csrfToken() });
+      return res.render("transfer", {
+        sent: errors.array()[0].msg,
+        csrfToken: req.csrfToken(),
+      });
     }
 
     const account_from = req.session.account_no;
     const account_to = parseInt(req.body.account_to);
     const amount = parseFloat(req.body.amount);
 
-    db.get("SELECT balance FROM users WHERE account_no = ?", [account_from], (err, row) => {
-      if (err) {
-        console.error("DB error fetching balance:", err);
-        return res.render("transfer", { sent: "Server error", csrfToken: req.csrfToken() });
-      }
-      if (!row) {
-        return res.render("transfer", { sent: "Invalid sender account", csrfToken: req.csrfToken() });
-      }
+    db.get(
+      "SELECT balance FROM users WHERE account_no = ?",
+      [account_from],
+      (err, row) => {
+        if (err) {
+          console.error("DB error fetching balance:", err);
+          return res.render("transfer", {
+            sent: "Server error",
+            csrfToken: req.csrfToken(),
+          });
+        }
+        if (!row) {
+          return res.render("transfer", {
+            sent: "Invalid sender account",
+            csrfToken: req.csrfToken(),
+          });
+        }
 
-      if (row.balance < amount) {
-        return res.render("transfer", { sent: "Insufficient funds.", csrfToken: req.csrfToken() });
-      }
+        if (row.balance < amount) {
+          return res.render("transfer", {
+            sent: "Insufficient funds.",
+            csrfToken: req.csrfToken(),
+          });
+        }
 
-      db.serialize(() => {
-        db.run("BEGIN TRANSACTION");
-        db.run(
-          "UPDATE users SET balance = balance + ? WHERE account_no = ?",
-          [amount, account_to],
-          function (err1) {
-            if (err1 || this.changes === 0) {
-              console.error("Error updating recipient balance:", err1);
-              db.run("ROLLBACK");
-              return res.render("transfer", { sent: "Transfer failed (recipient).", csrfToken: req.csrfToken() });
-            }
-
-            db.run(
-              "UPDATE users SET balance = balance - ? WHERE account_no = ?",
-              [amount, account_from],
-              function (err2) {
-                if (err2 || this.changes === 0) {
-                  console.error("Error updating sender balance:", err2);
-                  db.run("ROLLBACK");
-                  return res.render("transfer", { sent: "Transfer failed (sender).", csrfToken: req.csrfToken() });
-                }
-
-                db.run("COMMIT", (commitErr) => {
-                  if (commitErr) {
-                    console.error("Error committing transaction:", commitErr);
-                    db.run("ROLLBACK");
-                    return res.render("transfer", { sent: "Transfer failed.", csrfToken: req.csrfToken() });
-                  }
-
-                  res.render("transfer", { sent: "Money Transferred", csrfToken: req.csrfToken() });
+        db.serialize(() => {
+          db.run("BEGIN TRANSACTION");
+          db.run(
+            "UPDATE users SET balance = balance + ? WHERE account_no = ?",
+            [amount, account_to],
+            function (err1) {
+              if (err1 || this.changes === 0) {
+                console.error("Error updating recipient balance:", err1);
+                db.run("ROLLBACK");
+                return res.render("transfer", {
+                  sent: "Transfer failed (recipient).",
+                  csrfToken: req.csrfToken(),
                 });
               }
-            );
-          }
-        );
-      });
-    });
+
+              db.run(
+                "UPDATE users SET balance = balance - ? WHERE account_no = ?",
+                [amount, account_from],
+                function (err2) {
+                  if (err2 || this.changes === 0) {
+                    console.error("Error updating sender balance:", err2);
+                    db.run("ROLLBACK");
+                    return res.render("transfer", {
+                      sent: "Transfer failed (sender).",
+                      csrfToken: req.csrfToken(),
+                    });
+                  }
+
+                  db.run("COMMIT", (commitErr) => {
+                    if (commitErr) {
+                      console.error("Error committing transaction:", commitErr);
+                      db.run("ROLLBACK");
+                      return res.render("transfer", {
+                        sent: "Transfer failed.",
+                        csrfToken: req.csrfToken(),
+                      });
+                    }
+
+                    res.render("transfer", {
+                      sent: "Money Transferred",
+                      csrfToken: req.csrfToken(),
+                    });
+                  });
+                }
+              );
+            }
+          );
+        });
+      }
+    );
   }
 );
 
 app.get("/download", (req, res) => {
   if (!req.session.loggedin) return res.redirect("/");
-  res.render("download", { file_name: req.session.file_history, csrfToken: req.csrfToken() });
+  res.render("download", {
+    file_name: req.session.file_history,
+    csrfToken: req.csrfToken(),
+  });
 });
 
 app.post("/download", (req, res) => {
@@ -228,10 +262,11 @@ app.post("/download", (req, res) => {
 });
 
 app.get("/public_forum", (req, res) => {
-  if (!req.session.loggedin) return res.redirect("/");
+  if (!req.session.loggedin) {
+    return res.redirect("/");
+  }
   db.all(`SELECT username, message FROM public_forum`, (err, rows) => {
     if (err) {
-      console.error("Forum load error:", err);
       return res.send("Error loading forum");
     }
     res.render("forum", { rows });
@@ -240,19 +275,26 @@ app.get("/public_forum", (req, res) => {
 
 app.post(
   "/public_forum",
-  body("comment").trim().notEmpty().withMessage("Comment cannot be empty").escape(),
+  body("comment")
+    .trim()
+    .notEmpty()
+    .withMessage("Comment cannot be empty")
+    .escape(),
   (req, res) => {
     if (!req.session.loggedin) return res.redirect("/");
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
-      return db.all(`SELECT username, message FROM public_forum`, (err, rows) => {
-        if (err) {
-          console.error("Forum load error:", err);
-          return res.send("Error loading forum");
+      return db.all(
+        `SELECT username, message FROM public_forum`,
+        (err, rows) => {
+          if (err) {
+            console.error("Forum load error:", err);
+            return res.send("Error loading forum");
+          }
+          return res.render("forum", { rows, error: errors.array()[0].msg });
         }
-        return res.render("forum", { rows, error: errors.array()[0].msg });
-      });
+      );
     }
 
     const comment = req.body.comment;
