@@ -3,6 +3,9 @@ const express = require("express");
 const session = require("express-session");
 const path = require("path");
 const fs = require("fs");
+const { body, validationResult } = require("express-validator");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
 const db = new sqlite3.Database("./db/bank_sample.db");
 
@@ -10,32 +13,51 @@ const app = express();
 const PORT = 3000;
 app.set("view engine", "ejs");
 app.use(express.static(path.join(__dirname, "public")));
-
+app.use(helmet());
 app.use(
   session({
     secret: "secret",
-    resave: true,
-    saveUninitialized: true,
+    resave: false,
+    saveUninitialized: false,
+    cookie: {
+      secure: false,
+      httpOnly: true,
+    },
   })
 );
 
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());
+app.use(express.urlencoded({ extended: false, limit: "10kb" }));
+app.use(express.json({ limit: "10kb" }));
 
 app.get("/", function (request, response) {
   response.sendFile(path.join(__dirname + "/html/login.html"));
 });
 
-//LOGIN SQL
-app.post("/auth", function (request, response) {
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: "Muitas tentativas de login, tente novamente depois.",
+});
+
+const loginValidation = [
+  body("username")
+    .trim()
+    .notEmpty()
+    .withMessage("Username is required")
+    .escape(),
+  body("password").trim().notEmpty().withMessage("Password is required"),
+];
+
+app.post("/auth", loginLimiter, loginValidation, (request, response) => {
   var username = request.body.username;
   var password = request.body.password;
   if (username && password) {
     db.get(
-      `SELECT * FROM users WHERE username = '${request.body.username}' AND password = '${request.body.password}'`,
+      `SELECT * FROM users WHERE username = ? AND password = ?`,
+      [username, password],
       function (error, results) {
-        console.log(error);
-        console.log(results);
         if (results) {
           request.session.loggedin = true;
           request.session.username = results["username"];
