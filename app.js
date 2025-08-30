@@ -271,7 +271,6 @@ app.post(
     }
 
     const comment = request.body.comment;
-    console.log("🚀 ~ comment:", comment);
     const username = request.session.username;
 
     db.run(
