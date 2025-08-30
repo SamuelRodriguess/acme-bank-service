@@ -49,8 +49,7 @@ for secure money transfers.
 - `app.js` - main Express app and routes
 - `db/` - SQLite database files and queries
 - `views/` - templates for rendering pages (e.g., forum, ledger)
-- `middlewares/` - express-validator middlewares and custom authentication checks
-- 
+  
 ## App
   <table>
   <tr>
