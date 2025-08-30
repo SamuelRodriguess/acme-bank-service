@@ -282,26 +282,22 @@ app.post(
 
 app.get(
   "/public_ledger",
-  check("id").optional().isInt().withMessage("id must be an integer"),
+  [
+    check("id").optional().isInt().withMessage("id must be an integer"),
+  ],
   (request, response) => {
     if (!request.session.loggedin) {
       return response.redirect("/");
     }
-
-    const errors = validationResult(request);
-    if (!errors.isEmpty()) {
-      return response.status(400).json({ errors: errors.array() });
-    }
-
     if (request.query.id) {
-      db.all(
-        `SELECT * FROM public_ledger WHERE from_account = ?`,
-        [request.query.id],
+      return db.all(
+        `SELECT * FROM public_ledger WHERE from_account = $id`,
+        { $id: request.query.id },
         (err, rows) => {
           if (err) {
             return response.send("Error loading ledger");
           }
-          response.render("ledger", { rows });
+          return response.render("ledger", { rows });
         }
       );
     }
@@ -310,7 +306,7 @@ app.get(
       if (err) {
         return response.send("Error loading ledger");
       }
-      response.render("ledger", { rows });
+      return response.render("ledger", { rows });
     });
   }
 );
