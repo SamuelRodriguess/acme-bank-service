@@ -1,6 +1,10 @@
 const express = require("express");
 const path = require("path");
 const session = require("express-session");
+
+const { RedisStore } = require("connect-redis");
+const { createClient } = require("redis");
+
 const indexRoutes = require("./routes/indexRoutes");
 const authRoutes = require("./routes/authRoutes");
 const homeRoutes = require("./routes/homeRoutes");
@@ -8,12 +12,15 @@ const transferRoutes = require("./routes/transferRoutes");
 const downloadRoutes = require("./routes/downloadRoutes");
 const forumRoutes = require("./routes/forumRoutes");
 const ledgerRoutes = require("./routes/ledgerRoutes");
-const { CSRF_TOKEN_ERROR_CODE } = require("./config/constants");
+const { CSRF_TOKEN_ERROR_CODE, REDIS_PROXY } = require("./config/constants");
 
-const {
-  helmetMiddleware,
-  cookieParser,
-} = require("./config/middlewares");
+const { helmetMiddleware, cookieParser } = require("./config/middlewares");
+
+const redisClient = createClient({
+  legacyMode: true, 
+  url: REDIS_PROXY,
+});
+redisClient.connect().catch(console.error);
 
 const app = express();
 
@@ -24,14 +31,16 @@ app.use(cookieParser());
 
 app.use(
   session({
+    store: new RedisStore({ client: redisClient }),
     secret: "secret",
-    resave: true,
-    saveUninitialized: true,
+    resave: false,
+    saveUninitialized: false,
+    cookie: { secure: false },
   })
 );
 
-app.use(express.urlencoded({ extended: false, limit: "10kb" }));
-app.use(express.json({ limit: "10kb" }));
+app.use(express.urlencoded({ extended: false, limit: "100kb" }));
+app.use(express.json({ limit: "100kb" }));
 
 app.use(indexRoutes);
 app.use(homeRoutes);

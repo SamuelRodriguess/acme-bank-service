@@ -20,6 +20,7 @@
   "license": "ISC",
   "dependencies": {
     "body-parser": "^1.19.0",
+    "connect-redis": "^9.0.0",
     "cookie-parser": "^1.4.5",
     "csurf": "^1.11.0",
     "ejs": "^3.1.6",
@@ -28,6 +29,7 @@
     "express-session": "^1.17.2",
     "express-validator": "^6.12.1",
     "helmet": "^4.6.0",
+    "redis": "^5.8.2",
     "sqlite3": "^5.0.2"
   },
   "devDependencies": {
