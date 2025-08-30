@@ -31,11 +31,11 @@ app.use(cookieParser());
 const csfMiddleware = csurf({
   cookie: {
     httpOnly: true,
-    sameSite: "lax" // ou "strict"
+    sameSite: "lax", // ou "strict"
   },
 });
 
-app.use((error, request, response, next) =>{
+app.use((error, request, response, next) => {
   if (error.code !== "EBADCSRFTOKEN") {
     return next();
   }
@@ -123,60 +123,71 @@ const transferValidation = [
     .withMessage("Amount must be greater than zero"),
 ];
 
-app.post("/transfer", csfMiddleware, transferValidation, (request, response) => {
-  if (!request.session.loggedin) {
-    return response.redirect("/");
-  }
-  const balance = request.session.balance;
-  const account_to = parseInt(request.body.account_to);
-  const amount = parseInt(request.body.amount);
-  const account_from = request.session.account_no;
+app.post(
+  "/transfer",
+  csfMiddleware,
+  transferValidation,
+  (request, response) => {
+    if (!request.session.loggedin) {
+      return response.redirect("/");
+    }
+    const balance = request.session.balance;
+    const account_to = parseInt(request.body.account_to);
+    const amount = parseInt(request.body.amount);
+    const account_from = request.session.account_no;
 
-  if (!account_to || !amount) {
-    return response.render("transfer", { sent: "", csrfToken: request.csrfToken() });
-  }
+    if (!account_to || !amount) {
+      return response.render("transfer", {
+        sent: "",
+        csrfToken: request.csrfToken(),
+      });
+    }
 
-  if (balance <= amount) {
-    return response.render("transfer", {
-      sent: "You Don't Have Enough Funds.",
-      csrfToken: request.csrfToken()
-    });
-  }
-  // Use serialize to execute queries sequentially inside a transaction
-  db.serialize(() => {
-    // Start transaction to ensure atomicity
-    db.run("BEGIN TRANSACTION");
-    // Debit amount from sender's account
-    db.run(
-      `UPDATE users SET balance = balance - ? WHERE account_no = ?`,
-      [amount, account_from],
-      (error) => {
-        if (error) {
-          db.run("ROLLBACK");
-          return response.render("transfer", {
-            sent: "Error processing transfer.",
-            csrfToken: request.csrfToken()
-          });
-        }
-        db.run(
-          `UPDATE users SET balance = balance + ? WHERE account_no = ?`,
-          [amount, account_to],
-          (error) => {
-            if (error) {
-              db.run("ROLLBACK");
+    if (balance <= amount) {
+      return response.render("transfer", {
+        sent: "You Don't Have Enough Funds.",
+        csrfToken: request.csrfToken(),
+      });
+    }
+    // Use serialize to execute queries sequentially inside a transaction
+    db.serialize(() => {
+      // Start transaction to ensure atomicity
+      db.run("BEGIN TRANSACTION");
+      // Debit amount from sender's account
+      db.run(
+        `UPDATE users SET balance = balance - ? WHERE account_no = ?`,
+        [amount, account_from],
+        (error) => {
+          if (error) {
+            db.run("ROLLBACK");
+            return response.render("transfer", {
+              sent: "Error processing transfer.",
+              csrfToken: request.csrfToken(),
+            });
+          }
+          db.run(
+            `UPDATE users SET balance = balance + ? WHERE account_no = ?`,
+            [amount, account_to],
+            (error) => {
+              if (error) {
+                db.run("ROLLBACK");
+                return response.render("transfer", {
+                  sent: "Error processing transfer.",
+                  csrfToken: request.csrfToken(),
+                });
+              }
+              db.run("COMMIT");
               return response.render("transfer", {
-                sent: "Error processing transfer.",
-                csrfToken: request.csrfToken()
+                sent: "Money Transferred",
+                csrfToken: request.csrfToken(),
               });
             }
-            db.run("COMMIT");
-            return response.render("transfer", { sent: "Money Transferred", csrfToken: request.csrfToken() } );
-          }
-        );
-      }
-    );
-  });
-});
+          );
+        }
+      );
+    });
+  }
+);
 
 app.get("/download", function (request, response) {
   if (!request.session.loggedin) {
@@ -219,19 +230,18 @@ app.post("/download", downloadValidation, (request, response) => {
   });
 });
 
-app.get("/public_forum", function (request, response) {
+app.get("/public_forum", csfMiddleware, function (request, response) {
   if (!request.session.loggedin) {
     return response.redirect("/");
   }
   db.all(`SELECT username,message FROM public_forum`, (err, rows) => {
-    console.log(rows);
-    console.log(err);
-    response.render("forum", { rows });
+    response.render("forum", { rows, csrfToken: request.csrfToken() });
   });
 });
 
 app.post(
   "/public_forum",
+  csfMiddleware,
   body("comment")
     .trim()
     .notEmpty()
@@ -251,15 +261,17 @@ app.post(
             console.error("Forum load error:", err);
             return request.send("Error loading forum");
           }
-          return request.render("forum", {
+          return response.render("forum", {
             rows,
             error: errors.array()[0].msg,
+            csrfToken: request.csrfToken(),
           });
         }
       );
     }
 
     const comment = request.body.comment;
+    console.log("🚀 ~ comment:", comment);
     const username = request.session.username;
 
     db.run(
@@ -273,7 +285,7 @@ app.post(
           if (err) {
             return response.send("Error loading forum");
           }
-          response.render("forum", { rows });
+          response.render("forum", { rows, csrfToken: request.csrfToken() });
         });
       }
     );
@@ -282,9 +294,7 @@ app.post(
 
 app.get(
   "/public_ledger",
-  [
-    check("id").optional().isInt().withMessage("id must be an integer"),
-  ],
+  [check("id").optional().isInt().withMessage("id must be an integer")],
   (request, response) => {
     if (!request.session.loggedin) {
       return response.redirect("/");
