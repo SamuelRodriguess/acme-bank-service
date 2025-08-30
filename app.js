@@ -1,303 +1,230 @@
 const sqlite3 = require("sqlite3");
 const express = require("express");
 const session = require("express-session");
-const { body, validationResult } = require("express-validator");
 const path = require("path");
 const fs = require("fs");
-const helmet = require("helmet");
-const csurf = require("csurf");
-const bcrypt = require("bcrypt");
-const rateLimit = require("express-rate-limit");
-
-const app = express();
-const PORT = 3000;
-
-app.use(helmet());
-app.use(express.static(path.join(__dirname, "public")));
-app.use(express.urlencoded({ extended: false, limit: "10kb" }));
-app.use(express.json({ limit: "10kb" }));
-
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "super-secret-key",
-    resave: false,
-    saveUninitialized: false,
-    cookie: {
-      secure: process.env.NODE_ENV === "production",
-      httpOnly: true,
-      sameSite: "lax",
-    },
-  })
-);
-
-app.use(csurf());
-
-app.use((req, res, next) => {
-  res.locals.csrfToken = req.csrfToken();
-  next();
-});
-
-const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 10,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: "Muitas tentativas de login, tente novamente depois.",
-});
 
 const db = new sqlite3.Database("./db/bank_sample.db");
 
-app.get("/", (req, res) => {
-  res.sendFile(path.join(__dirname, "html/login.html"));
-});
+const app = express();
+const PORT = 3000;
+app.set("view engine", "ejs");
+app.use(express.static(path.join(__dirname, "public")));
 
-const loginValidation = [
-  body("username").trim().notEmpty().withMessage("Username is required").escape(),
-  body("password").trim().notEmpty().withMessage("Password is required"),
-];
-
-app.post("/auth", loginLimiter, loginValidation, (req, res) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).send(errors.array()[0].msg);
-  }
-
-  const { username, password } = req.body;
-
-  db.get("SELECT * FROM users WHERE username = ?", [username], async (error, user) => {
-    if (error) {
-      console.error("DB error on login:", error);
-      return res.status(500).send("Server error");
-    }
-    if (!user) {
-      return res.status(401).send("Incorrect Username and/or Password!");
-    }
-
-    const match = await bcrypt.compare(password, user.password);
-    if (!match) {
-      return res.status(401).send("Incorrect Username and/or Password!");
-    }
-
-    req.session.loggedin = true;
-    req.session.username = user.username;
-    req.session.file_history = user.file_history;
-    req.session.account_no = user.account_no;
-
-    res.redirect("/home");
-  });
-});
-
-app.get("/home", (req, res) => {
-  if (!req.session.loggedin) return res.redirect("/");
-
-  db.get("SELECT balance FROM users WHERE username = ?", [req.session.username], (err, row) => {
-    if (err) {
-      console.error("DB error on /home:", err);
-      return res.status(500).send("Server error");
-    }
-    if (!row) {
-      return res.status(404).send("User not found");
-    }
-
-    res.render("home_page", {
-      username: req.session.username,
-      balance: row.balance,
-    });
-  });
-});
-
-app.get("/transfer", (req, res) => {
-  if (!req.session.loggedin) return res.redirect("/");
-  res.render("transfer", { sent: "", csrfToken: req.csrfToken() });
-});
-
-app.post(
-  "/transfer",
-  [
-    body("account_to")
-      .exists()
-      .withMessage("Recipient account is required")
-      .isInt({ gt: 0 })
-      .withMessage("Recipient account must be a positive integer"),
-    body("amount")
-      .exists()
-      .withMessage("Amount is required")
-      .isFloat({ gt: 0 })
-      .withMessage("Amount must be greater than zero"),
-  ],
-  (req, res) => {
-    if (!req.session.loggedin) return res.redirect("/");
-
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.render("transfer", { sent: errors.array()[0].msg, csrfToken: req.csrfToken() });
-    }
-
-    const account_from = req.session.account_no;
-    const account_to = parseInt(req.body.account_to);
-    const amount = parseFloat(req.body.amount);
-
-    db.get("SELECT balance FROM users WHERE account_no = ?", [account_from], (err, row) => {
-      if (err) {
-        console.error("DB error fetching balance:", err);
-        return res.render("transfer", { sent: "Server error", csrfToken: req.csrfToken() });
-      }
-      if (!row) {
-        return res.render("transfer", { sent: "Invalid sender account", csrfToken: req.csrfToken() });
-      }
-
-      if (row.balance < amount) {
-        return res.render("transfer", { sent: "Insufficient funds.", csrfToken: req.csrfToken() });
-      }
-
-      db.serialize(() => {
-        db.run("BEGIN TRANSACTION");
-        db.run(
-          "UPDATE users SET balance = balance + ? WHERE account_no = ?",
-          [amount, account_to],
-          function (err1) {
-            if (err1 || this.changes === 0) {
-              console.error("Error updating recipient balance:", err1);
-              db.run("ROLLBACK");
-              return res.render("transfer", { sent: "Transfer failed (recipient).", csrfToken: req.csrfToken() });
-            }
-
-            db.run(
-              "UPDATE users SET balance = balance - ? WHERE account_no = ?",
-              [amount, account_from],
-              function (err2) {
-                if (err2 || this.changes === 0) {
-                  console.error("Error updating sender balance:", err2);
-                  db.run("ROLLBACK");
-                  return res.render("transfer", { sent: "Transfer failed (sender).", csrfToken: req.csrfToken() });
-                }
-
-                db.run("COMMIT", (commitErr) => {
-                  if (commitErr) {
-                    console.error("Error committing transaction:", commitErr);
-                    db.run("ROLLBACK");
-                    return res.render("transfer", { sent: "Transfer failed.", csrfToken: req.csrfToken() });
-                  }
-
-                  res.render("transfer", { sent: "Money Transferred", csrfToken: req.csrfToken() });
-                });
-              }
-            );
-          }
-        );
-      });
-    });
-  }
+app.use(
+  session({
+    secret: "secret",
+    resave: true,
+    saveUninitialized: true,
+  })
 );
 
-app.get("/download", (req, res) => {
-  if (!req.session.loggedin) return res.redirect("/");
-  res.render("download", { file_name: req.session.file_history, csrfToken: req.csrfToken() });
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+
+app.get("/", function (request, response) {
+  response.sendFile(path.join(__dirname + "/html/login.html"));
 });
 
-app.post("/download", (req, res) => {
-  if (!req.session.loggedin) return res.redirect("/");
-
-  let file_name = req.body.file;
-  if (!file_name) return res.status(400).send("No file specified");
-
-  if (!/^[a-zA-Z0-9_\-\.]+$/.test(file_name)) {
-    return res.status(400).send("Invalid file name");
-  }
-
-  const safeFileName = path.basename(file_name);
-  const filePath = path.join(__dirname, "history_files", safeFileName);
-
-  if (!filePath.startsWith(path.join(__dirname, "history_files"))) {
-    return res.status(400).send("Invalid access");
-  }
-
-  fs.readFile(filePath, "utf8", (err, content) => {
-    if (err) {
-      console.error("File read error:", err);
-      return res.status(404).send("File not found");
-    }
-    res.type("text/plain").send(content);
-  });
-});
-
-app.get("/public_forum", (req, res) => {
-  if (!req.session.loggedin) return res.redirect("/");
-  db.all(`SELECT username, message FROM public_forum`, (err, rows) => {
-    if (err) {
-      console.error("Forum load error:", err);
-      return res.send("Error loading forum");
-    }
-    res.render("forum", { rows });
-  });
-});
-
-app.post(
-  "/public_forum",
-  body("comment").trim().notEmpty().withMessage("Comment cannot be empty").escape(),
-  (req, res) => {
-    if (!req.session.loggedin) return res.redirect("/");
-
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return db.all(`SELECT username, message FROM public_forum`, (err, rows) => {
-        if (err) {
-          console.error("Forum load error:", err);
-          return res.send("Error loading forum");
+//LOGIN SQL
+app.post("/auth", function (request, response) {
+  var username = request.body.username;
+  var password = request.body.password;
+  if (username && password) {
+    db.get(
+      `SELECT * FROM users WHERE username = '${request.body.username}' AND password = '${request.body.password}'`,
+      function (error, results) {
+        console.log(error);
+        console.log(results);
+        if (results) {
+          request.session.loggedin = true;
+          request.session.username = results["username"];
+          request.session.balance = results["balance"];
+          request.session.file_history = results["file_history"];
+          request.session.account_no = results["account_no"];
+          response.redirect("/home");
+        } else {
+          response.send("Incorrect Username and/or Password!");
         }
-        return res.render("forum", { rows, error: errors.array()[0].msg });
-      });
-    }
-
-    const comment = req.body.comment;
-    const username = req.session.username;
-
-    db.run(
-      `INSERT INTO public_forum (username, message) VALUES (?, ?)`,
-      [username, comment],
-      (err) => {
-        if (err) {
-          console.error("Insert comment error:", err);
-          return res.send("Error posting comment");
-        }
-        db.all(`SELECT username, message FROM public_forum`, (err, rows) => {
-          if (err) {
-            console.error("Forum load error:", err);
-            return res.send("Error loading forum");
-          }
-          res.render("forum", { rows });
-        });
-      }
-    );
-  }
-);
-
-app.get("/public_ledger", (req, res) => {
-  if (!req.session.loggedin) return res.redirect("/");
-
-  if (req.query.id) {
-    db.all(
-      `SELECT * FROM public_ledger WHERE from_account = ?`,
-      [req.query.id],
-      (err, rows) => {
-        if (err) {
-          console.error("Ledger query error:", err);
-          return res.send("Error loading ledger");
-        }
-        res.render("ledger", { rows });
+        response.end();
       }
     );
   } else {
-    db.all(`SELECT * FROM public_ledger`, (err, rows) => {
-      if (err) {
-        console.error("Ledger load error:", err);
-        return res.send("Error loading ledger");
-      }
-      res.render("ledger", { rows });
-    });
+    response.send("Please enter Username and Password!");
+    response.end();
   }
 });
 
+//Home Menu No Exploits Here.
+app.get("/home", function (request, response) {
+  if (request.session.loggedin) {
+    username = request.session.username;
+    balance = request.session.balance;
+    response.render("home_page", { username, balance });
+  } else {
+    response.redirect("/");
+  }
+  response.end();
+});
+
+//CSRF CODE SECURED. SEE HEADERS SET ABOVE
+app.get("/transfer", function (request, response) {
+  if (request.session.loggedin) {
+    var sent = "";
+    response.render("transfer", { sent });
+  } else {
+    response.redirect("/");
+  }
+});
+
+//CSRF CODE
+app.post("/transfer", function (request, response) {
+  if (request.session.loggedin) {
+    console.log("Transfer in progress");
+    var balance = request.session.balance;
+    var account_to = parseInt(request.body.account_to);
+    var amount = parseInt(request.body.amount);
+    var account_from = request.session.account_no;
+    if (account_to && amount) {
+      if (balance > amount) {
+        db.get(
+          `UPDATE users SET balance = balance + ${amount} WHERE account_no = ${account_to}`,
+          function (error, results) {
+            console.log(error);
+            console.log(results);
+          }
+        );
+        db.get(
+          `UPDATE users SET balance = balance - ${amount} WHERE account_no = ${account_from}`,
+          function (error, results) {
+            var sent = "Money Transfered";
+            response.render("transfer", { sent });
+          }
+        );
+      } else {
+        var sent = "You Don't Have Enough Funds.";
+        response.render("transfer", { sent });
+      }
+    } else {
+      var sent = "";
+      response.render("transfer", { sent });
+    }
+  } else {
+    response.redirect("/");
+  }
+});
+
+//PATH TRAVERSAL CODE
+app.get("/download", function (request, response) {
+  if (request.session.loggedin) {
+    file_name = request.session.file_history;
+    response.render("download", { file_name });
+  } else {
+    response.redirect("/");
+  }
+  response.end();
+});
+
+app.post("/download", function (request, response) {
+  if (request.session.loggedin) {
+    var file_name = request.body.file;
+
+    response.statusCode = 200;
+    response.setHeader("Content-Type", "text/html");
+
+    // Change the filePath to current working directory using the "path" method
+    const filePath = "history_files/" + file_name;
+    console.log(filePath);
+    try {
+      content = fs.readFileSync(filePath, "utf8");
+      response.end(content);
+    } catch (err) {
+      console.log(err);
+      response.end("File not found");
+    }
+  } else {
+    response.redirect("/");
+  }
+  response.end();
+});
+
+//XSS CODE
+app.get("/public_forum", function (request, response) {
+  if (request.session.loggedin) {
+    db.all(`SELECT username,message FROM public_forum`, (err, rows) => {
+      console.log(rows);
+      console.log(err);
+      response.render("forum", { rows });
+    });
+  } else {
+    response.redirect("/");
+  }
+  //response.end();
+});
+
+app.post("/public_forum", function (request, response) {
+  if (request.session.loggedin) {
+    var comment = request.body.comment;
+    var username = request.session.username;
+    if (comment) {
+      db.all(
+        `INSERT INTO public_forum (username,message) VALUES ('${username}','${comment}')`,
+        (err, rows) => {
+          console.log(err);
+        }
+      );
+      db.all(`SELECT username,message FROM public_forum`, (err, rows) => {
+        console.log(rows);
+        console.log(err);
+        response.render("forum", { rows });
+      });
+    } else {
+      db.all(`SELECT username,message FROM public_forum`, (err, rows) => {
+        console.log(rows);
+        console.log(err);
+        response.render("forum", { rows });
+      });
+    }
+    comment = "";
+  } else {
+    response.redirect("/");
+  }
+  comment = "";
+  //response.end();
+});
+
+//SQL UNION INJECTION
+app.get("/public_ledger", function (request, response) {
+  if (request.session.loggedin) {
+    var id = request.query.id;
+    if (id) {
+      db.all(
+        `SELECT * FROM public_ledger WHERE from_account = '${id}'`,
+        (err, rows) => {
+          console.log("PROCESSING INPU");
+          console.log(err);
+          if (rows) {
+            response.render("ledger", { rows });
+          } else {
+            response.render("ledger", { rows });
+          }
+        }
+      );
+    } else {
+      db.all(`SELECT * FROM public_ledger`, (err, rows) => {
+        if (rows) {
+          response.render("ledger", { rows });
+        } else {
+          response.render("ledger", { rows });
+        }
+      });
+    }
+  } else {
+    response.redirect("/");
+  }
+  //response.end();
+});
+
 app.listen(PORT, () => {
-  console.log(`Server started on port ${PORT}`);
+  console.log(`Server is running on port: ${PORT}`);
 });
