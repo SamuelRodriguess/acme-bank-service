@@ -75,26 +75,25 @@ app.post("/auth", loginLimiter, loginValidation, (request, response) => {
   );
 });
 
-//Home Menu No Exploits Here.
 app.get("/home", function (request, response) {
-  if (request.session.loggedin) {
-    username = request.session.username;
-    balance = request.session.balance;
-    response.render("home_page", { username, balance });
-  } else {
-    response.redirect("/");
+  if (!request.session.loggedin) {
+    return response.redirect("/");
   }
-  response.end();
+
+  const balanceUser = {
+    username: request.session.username,
+    balance: request.session.balance,
+  };
+
+  response.render("home_page", balanceUser);
 });
 
-//CSRF CODE SECURED. SEE HEADERS SET ABOVE
 app.get("/transfer", function (request, response) {
-  if (request.session.loggedin) {
-    const sent = "";
-    response.render("transfer", { sent });
-  } else {
-    response.redirect("/");
+  if (!request.session.loggedin) {
+    return response.redirect("/");
   }
+  const sent = { sent: '' };
+  response.render("transfer", sent);
 });
 
 const transferValidation = [
@@ -222,7 +221,9 @@ app.post(
     .withMessage("Comment cannot be empty")
     .escape(),
   (request, response) => {
-    if (!request.session.loggedin) return request.redirect("/");
+    if (!request.session.loggedin) {
+      return request.redirect("/");
+    }
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
