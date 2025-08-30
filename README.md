@@ -46,9 +46,26 @@ for secure money transfers.
 - File accesses are sanitized to prevent path traversal attacks
 
 ## Project Structure
-- `app.js` - main Express app and routes
-- `db/` - SQLite database files and queries
-- `views/` - templates for rendering pages (e.g., forum, ledger)
+Project Structure Overview
+This project follows a modular and organized structure to keep the code maintainable and scalable.
+
+- app.js - The main Express application setup. It configures the app, middleware, and connects the route modules.
+
+- db/ - Contains SQLite database files and query modules responsible for data management.
+
+- views/ - Holds EJS templates for rendering dynamic pages such as forum, ledger, and others.
+
+- controllers/ - Contains controller modules that process HTTP requests, validate data, and interact with service layers.
+
+- routes/ - Defines the routing modules that map URLs to the controller functions. Each router is modular and focused on a specific part of the application.
+
+- services/ - Implements business logic and data operations abstracted from controllers, responsible for interacting with the database or external APIs.
+
+- config/ - Configuration files including middleware setup, security settings, and database connection configurations.
+
+- public/ - Static assets like CSS, client-side JavaScript, and images served directly to clients.
+
+- middlewares/ - Custom Express middleware functions for authentication, rate limiting, error handling, etc.
   
 ## App
   <table>
