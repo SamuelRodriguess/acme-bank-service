@@ -51,8 +51,11 @@ const loginValidation = [
 ];
 
 app.post("/auth", loginLimiter, loginValidation, (request, response) => {
-  var username = request.body.username;
-  var password = request.body.password;
+  const errors = validationResult(request);
+  if (!errors.isEmpty()) {
+    return res.status(400).send("Incorrect Username and/or Password!");
+  }
+  const { username, password } = request.body;
   if (username && password) {
     db.get(
       `SELECT * FROM users WHERE username = ? AND password = ?`,
