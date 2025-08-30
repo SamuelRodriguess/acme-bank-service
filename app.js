@@ -56,28 +56,23 @@ app.post("/auth", loginLimiter, loginValidation, (request, response) => {
     return res.status(400).send("Incorrect Username and/or Password!");
   }
   const { username, password } = request.body;
-  if (username && password) {
-    db.get(
-      `SELECT * FROM users WHERE username = ? AND password = ?`,
-      [username, password],
-      function (error, results) {
-        if (results) {
-          request.session.loggedin = true;
-          request.session.username = results["username"];
-          request.session.balance = results["balance"];
-          request.session.file_history = results["file_history"];
-          request.session.account_no = results["account_no"];
-          response.redirect("/home");
-        } else {
-          response.send("Incorrect Username and/or Password!");
-        }
-        response.end();
+  db.get(
+    `SELECT * FROM users WHERE username = ? AND password = ?`,
+    [username, password],
+    (error, results) =>{
+      if (results) {
+        request.session.loggedin = true;
+        request.session.username = results["username"];
+        request.session.balance = results["balance"];
+        request.session.file_history = results["file_history"];
+        request.session.account_no = results["account_no"];
+        response.redirect("/home");
+      } else {
+        response.send("Incorrect Username and/or Password!");
       }
-    );
-  } else {
-    response.send("Please enter Username and Password!");
-    response.end();
-  }
+      response.end();
+    }
+  );
 });
 
 //Home Menu No Exploits Here.
@@ -95,49 +90,72 @@ app.get("/home", function (request, response) {
 //CSRF CODE SECURED. SEE HEADERS SET ABOVE
 app.get("/transfer", function (request, response) {
   if (request.session.loggedin) {
-    var sent = "";
+    const sent = "";
     response.render("transfer", { sent });
   } else {
     response.redirect("/");
   }
 });
 
-//CSRF CODE
-app.post("/transfer", function (request, response) {
-  if (request.session.loggedin) {
-    console.log("Transfer in progress");
-    var balance = request.session.balance;
-    var account_to = parseInt(request.body.account_to);
-    var amount = parseInt(request.body.amount);
-    var account_from = request.session.account_no;
-    if (account_to && amount) {
-      if (balance > amount) {
-        db.get(
-          `UPDATE users SET balance = balance + ${amount} WHERE account_no = ${account_to}`,
-          function (error, results) {
-            console.log(error);
-            console.log(results);
-          }
-        );
-        db.get(
-          `UPDATE users SET balance = balance - ${amount} WHERE account_no = ${account_from}`,
-          function (error, results) {
-            var sent = "Money Transfered";
-            response.render("transfer", { sent });
-          }
-        );
-      } else {
-        var sent = "You Don't Have Enough Funds.";
-        response.render("transfer", { sent });
-      }
-    } else {
-      var sent = "";
-      response.render("transfer", { sent });
-    }
-  } else {
-    response.redirect("/");
+const transferValidation = [
+    body("account_to")
+      .exists()
+      .withMessage("Recipient account is required")
+      .isInt({ gt: 0 })
+      .withMessage("Recipient account must be a positive integer"),
+    body("amount")
+      .exists()
+      .withMessage("Amount is required")
+      .isFloat({ gt: 0 })
+      .withMessage("Amount must be greater than zero"),
+  ]
+
+app.post("/transfer", transferValidation, (request, response) => {
+  if (!request.session.loggedin) {
+    return response.redirect("/");
   }
+  const balance = request.session.balance;
+  const account_to = parseInt(request.body.account_to);
+  const amount = parseInt(request.body.amount);
+  const account_from = request.session.account_no;
+
+  if (!account_to || !amount) {
+    return response.render("transfer", { sent: "" });
+  }
+
+  if (balance <= amount) {
+    return response.render("transfer", { sent: "You Don't Have Enough Funds." });
+  }
+  // Use serialize to execute queries sequentially inside a transaction
+  db.serialize(() => {
+    // Start transaction to ensure atomicity
+    db.run("BEGIN TRANSACTION");
+    // Debit amount from sender's account
+    db.run(
+      `UPDATE users SET balance = balance - ? WHERE account_no = ?`,
+      [amount, account_from],
+      (error) => {
+        if (error) {
+          db.run("ROLLBACK");
+          return response.render("transfer", { sent: "Error processing transfer." });
+        }
+        db.run(
+          `UPDATE users SET balance = balance + ? WHERE account_no = ?`,
+          [amount, account_to],
+          (error) => {
+            if (error) {
+              db.run("ROLLBACK");
+              return response.render("transfer", { sent: "Error processing transfer." });
+            }
+            db.run("COMMIT");
+            return response.render("transfer", { sent: "Money Transferred" });
+          }
+        );
+      }
+    );
+  });
 });
+
 
 //PATH TRAVERSAL CODE
 app.get("/download", function (request, response) {
@@ -152,7 +170,7 @@ app.get("/download", function (request, response) {
 
 app.post("/download", function (request, response) {
   if (request.session.loggedin) {
-    var file_name = request.body.file;
+    const file_name = request.body.file;
 
     response.statusCode = 200;
     response.setHeader("Content-Type", "text/html");
@@ -189,8 +207,8 @@ app.get("/public_forum", function (request, response) {
 
 app.post("/public_forum", function (request, response) {
   if (request.session.loggedin) {
-    var comment = request.body.comment;
-    var username = request.session.username;
+    const comment = request.body.comment;
+    const username = request.session.username;
     if (comment) {
       db.all(
         `INSERT INTO public_forum (username,message) VALUES ('${username}','${comment}')`,
@@ -221,7 +239,7 @@ app.post("/public_forum", function (request, response) {
 //SQL UNION INJECTION
 app.get("/public_ledger", function (request, response) {
   if (request.session.loggedin) {
-    var id = request.query.id;
+    const id = request.query.id;
     if (id) {
       db.all(
         `SELECT * FROM public_ledger WHERE from_account = '${id}'`,
