@@ -25,7 +25,7 @@ app.use(cookieParser());
 
 const redisClient = createClient({
   legacyMode: true,
-  url: process.env.REDIS_URL || process.env.REDIS_PUBLIC_URL,
+  url: process.env.REDIS_URL,
 });
 redisClient.connect().catch(console.error);
 
@@ -35,7 +35,7 @@ app.use(
     secret: process.env.SESSION_SECRET || "seusegredo",
     resave: false,
     saveUninitialized: false,
-    cookie: { secure: true, maxAge: 3600000 },
+    cookie: { secure: false, httpOnly: true},
   })
 );
 
