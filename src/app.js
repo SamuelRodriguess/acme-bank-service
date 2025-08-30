@@ -12,13 +12,13 @@ const transferRoutes = require("./routes/transferRoutes");
 const downloadRoutes = require("./routes/downloadRoutes");
 const forumRoutes = require("./routes/forumRoutes");
 const ledgerRoutes = require("./routes/ledgerRoutes");
-const { CSRF_TOKEN_ERROR_CODE, REDIS_PROXY } = require("./config/constants");
+const { CSRF_TOKEN_ERROR_CODE } = require("./config/constants");
 
 const { helmetMiddleware, cookieParser } = require("./config/middlewares");
 
 const redisClient = createClient({
   legacyMode: true, 
-  url: REDIS_PROXY,
+  url: process.env.REDIS_URL,
 });
 redisClient.connect().catch(console.error);
 
