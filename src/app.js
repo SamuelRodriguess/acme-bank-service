@@ -8,6 +8,7 @@ const transferRoutes = require("./routes/transferRoutes");
 const downloadRoutes = require("./routes/downloadRoutes");
 const forumRoutes = require("./routes/forumRoutes");
 const ledgerRoutes = require("./routes/ledgerRoutes");
+const { CSRF_TOKEN_ERROR_CODE } = require("./config/constants");
 
 const {
   helmetMiddleware,
@@ -15,9 +16,9 @@ const {
 } = require("./config/middlewares");
 
 const app = express();
+
 app.set("view engine", "ejs");
 app.use(express.static(path.join(__dirname, "../public")));
-
 app.use(helmetMiddleware);
 app.use(cookieParser());
 
@@ -41,7 +42,7 @@ app.use(forumRoutes);
 app.use(ledgerRoutes);
 
 app.use((error, req, res, next) => {
-  if (error.code !== "EBADCSRFTOKEN") {
+  if (error.code !== CSRF_TOKEN_ERROR_CODE) {
     return next();
   }
   res.status(403).send("The token is invalid");

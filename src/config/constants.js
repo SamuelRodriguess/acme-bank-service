@@ -1,0 +1,1 @@
+export const CSRF_TOKEN_ERROR_CODE = "EBADCSRFTOKEN";
