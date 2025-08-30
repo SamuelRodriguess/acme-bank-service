@@ -59,7 +59,7 @@ app.post("/auth", loginLimiter, loginValidation, (request, response) => {
   db.get(
     `SELECT * FROM users WHERE username = ? AND password = ?`,
     [username, password],
-    (error, results) =>{
+    (error, results) => {
       if (results) {
         request.session.loggedin = true;
         request.session.username = results["username"];
@@ -98,17 +98,17 @@ app.get("/transfer", function (request, response) {
 });
 
 const transferValidation = [
-    body("account_to")
-      .exists()
-      .withMessage("Recipient account is required")
-      .isInt({ gt: 0 })
-      .withMessage("Recipient account must be a positive integer"),
-    body("amount")
-      .exists()
-      .withMessage("Amount is required")
-      .isFloat({ gt: 0 })
-      .withMessage("Amount must be greater than zero"),
-  ]
+  body("account_to")
+    .exists()
+    .withMessage("Recipient account is required")
+    .isInt({ gt: 0 })
+    .withMessage("Recipient account must be a positive integer"),
+  body("amount")
+    .exists()
+    .withMessage("Amount is required")
+    .isFloat({ gt: 0 })
+    .withMessage("Amount must be greater than zero"),
+];
 
 app.post("/transfer", transferValidation, (request, response) => {
   if (!request.session.loggedin) {
@@ -124,7 +124,9 @@ app.post("/transfer", transferValidation, (request, response) => {
   }
 
   if (balance <= amount) {
-    return response.render("transfer", { sent: "You Don't Have Enough Funds." });
+    return response.render("transfer", {
+      sent: "You Don't Have Enough Funds.",
+    });
   }
   // Use serialize to execute queries sequentially inside a transaction
   db.serialize(() => {
@@ -137,7 +139,9 @@ app.post("/transfer", transferValidation, (request, response) => {
       (error) => {
         if (error) {
           db.run("ROLLBACK");
-          return response.render("transfer", { sent: "Error processing transfer." });
+          return response.render("transfer", {
+            sent: "Error processing transfer.",
+          });
         }
         db.run(
           `UPDATE users SET balance = balance + ? WHERE account_no = ?`,
@@ -145,7 +149,9 @@ app.post("/transfer", transferValidation, (request, response) => {
           (error) => {
             if (error) {
               db.run("ROLLBACK");
-              return response.render("transfer", { sent: "Error processing transfer." });
+              return response.render("transfer", {
+                sent: "Error processing transfer.",
+              });
             }
             db.run("COMMIT");
             return response.render("transfer", { sent: "Money Transferred" });
@@ -156,39 +162,42 @@ app.post("/transfer", transferValidation, (request, response) => {
   });
 });
 
-
-//PATH TRAVERSAL CODE
 app.get("/download", function (request, response) {
-  if (request.session.loggedin) {
-    file_name = request.session.file_history;
-    response.render("download", { file_name });
-  } else {
-    response.redirect("/");
-  }
-  response.end();
+  if (!req.session.loggedin) return res.redirect("/");
+  response.render("download", { file_name: request.session.file_history });
 });
 
-app.post("/download", function (request, response) {
-  if (request.session.loggedin) {
-    const file_name = request.body.file;
+const downloadValidation = [
+  body("file")
+    .exists()
+    .withMessage("No file specified")
+    .bail()
+    .matches(/^[a-zA-Z0-9_\-\.]+$/)
+    .withMessage("Invalid file name"),
+];
 
-    response.statusCode = 200;
-    response.setHeader("Content-Type", "text/html");
+app.post("/download", downloadValidation, (req, res) => {
+  if (!req.session.loggedin) return res.redirect("/");
 
-    // Change the filePath to current working directory using the "path" method
-    const filePath = "history_files/" + file_name;
-    console.log(filePath);
-    try {
-      content = fs.readFileSync(filePath, "utf8");
-      response.end(content);
-    } catch (err) {
-      console.log(err);
-      response.end("File not found");
-    }
-  } else {
-    response.redirect("/");
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
   }
-  response.end();
+
+  const file_name = req.body.file;
+  const safeFileName = path.basename(file_name);
+  const filePath = path.join(__dirname, "history_files", safeFileName);
+
+  if (!filePath.startsWith(path.join(__dirname, "history_files"))) {
+    return res.status(400).send("Invalid access");
+  }
+
+  fs.readFile(filePath, "utf8", (err, content) => {
+    if (err) {
+      return res.status(404).send("File not found");
+    }
+    res.type("text/plain").send(content);
+  });
 });
 
 //XSS CODE
