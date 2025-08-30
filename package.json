@@ -1,8 +1,23 @@
 {
+  "name": "acme-bank-service",
+  "version": "1.0.0",
+  "description": "Bank Management Service",
+  "main": "src/server.js",
   "scripts": {
+    "start": "nodemon --watch app src/server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "nodemon --watch app app.js"
+    "lint": "eslint . --ext .js",
+    "lint:fix": "eslint . --ext .js --fix"
   },
+  "keywords": [
+    "express",
+    "nodejs",
+    "modular",
+    "api",
+    "webapp"
+  ],
+  "author": "Seu Nome",
+  "license": "ISC",
   "dependencies": {
     "body-parser": "^1.19.0",
     "cookie-parser": "^1.4.5",
@@ -13,10 +28,13 @@
     "express-session": "^1.17.2",
     "express-validator": "^6.12.1",
     "helmet": "^4.6.0",
-    "nodemon": "^3.1.10",
     "sqlite3": "^5.0.2"
   },
   "devDependencies": {
-    "eslint": "^7.32.0"
+    "eslint": "^7.32.0",
+    "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }
