@@ -45,7 +45,7 @@ const loginLimiter = rateLimit({
   message: "Muitas tentativas de login, tente novamente depois.",
 });
 
-const db = new sqlite3.Database("./bank_sample.db");
+const db = new sqlite3.Database("./db/bank_sample.db");
 
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "html/login.html"));
