@@ -25,7 +25,7 @@ app.use(cookieParser());
 
 const redisClient = createClient({
   legacyMode: true,
-  url: process.env.REDIS_PUBLIC_URL,
+  url: process.env.REDIS_URL || process.env.REDIS_PUBLIC_URL,
 });
 redisClient.connect().catch(console.error);
 
