@@ -304,7 +304,6 @@ app.get(
           response.render("ledger", { rows });
         }
       );
-      return response.end();
     }
 
     db.all(`SELECT * FROM public_ledger`, (err, rows) => {
